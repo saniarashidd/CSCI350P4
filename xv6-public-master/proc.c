@@ -530,5 +530,25 @@ procdump(void)
         cprintf(" %p", pc[i]);
     }
     cprintf("\n");
+    if (p->pgdir) { // Sania Rashid
+      cprintf("Page mappings:\n");
+      pde_t *pgdir = p->pgdir; //page directory
+      for (int pdI = 0; pdI < NPDENTRIES; pdI++) { //loop through page directories, pdI= index
+        pde_t pde = pgdir[pdI]; //page directory entry
+        if (!(pde & PTE_P)) { //not present
+          continue; // skip
+        }
+        pte_t *pgtab = (pte_t*)P2V(PTE_ADDR(pde)); //page table virtual address
+        for (int ptI = 0; ptI < NPTENTRIES; ptI++) { //loop through page table entries, ptI= index
+          pte_t pte = pgtab[ptI]; //page table entry
+          if (!(pte & PTE_P) || !(pte & PTE_U)) { //not present or a user page
+            continue; // skip
+          }
+          uint vpn = pdI * NPTENTRIES + ptI; //compute virtual page number
+          uint ppn = PTE_ADDR(pte) / PGSIZE; // compute physical page number
+          cprintf("%d -> %d , %s\n", vpn, ppn, (pte & PTE_W) ? "y" : "n");
+        }
+      }
+    }
   }
 }

@@ -89,3 +89,11 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+//return currently running process information
+int
+sys_procdump(void)
+{
+  procdump();
+  return 0;
+}
