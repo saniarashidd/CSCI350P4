@@ -23,6 +23,8 @@ struct {
   struct run *freelist;
 } kmem;
 
+uchar refcount[PHYSTOP / PGSIZE]; //Sania Rashid. counter of one byte per page
+
 // Initialization happens in two phases.
 // 1. main() calls kinit1() while still using entrypgdir to place just
 // the pages mapped by entrypgdir on free list.
@@ -48,8 +50,10 @@ freerange(void *vstart, void *vend)
 {
   char *p;
   p = (char*)PGROUNDUP((uint)vstart);
-  for(; p + PGSIZE <= (char*)vend; p += PGSIZE)
+  for(; p + PGSIZE <= (char*)vend; p += PGSIZE) {
+    refcount[V2P(p) / PGSIZE] = 1; //Sania Rashid
     kfree(p);
+  }
 }
 //PAGEBREAK: 21
 // Free the page of physical memory pointed at by v,
@@ -64,14 +68,19 @@ kfree(char *v)
   if((uint)v % PGSIZE || v < end || V2P(v) >= PHYSTOP)
     panic("kfree");
 
-  // Fill with junk to catch dangling refs.
-  memset(v, 1, PGSIZE);
-
   if(kmem.use_lock)
     acquire(&kmem.lock);
-  r = (struct run*)v;
-  r->next = kmem.freelist;
-  kmem.freelist = r;
+  //Sania Rashid
+  refcount[V2P(v) / PGSIZE]--; //decrement count
+
+  if (refcount[V2P(v) / PGSIZE] == 0) { //count goes to 0
+    // Fill with junk to catch dangling refs.
+    memset(v, 1, PGSIZE);
+    r = (struct run*)v;
+    r->next = kmem.freelist;
+    kmem.freelist = r;
+  }
+  
   if(kmem.use_lock)
     release(&kmem.lock);
 }
@@ -87,8 +96,10 @@ kalloc(void)
   if(kmem.use_lock)
     acquire(&kmem.lock);
   r = kmem.freelist;
-  if(r)
+  if(r) {
     kmem.freelist = r->next;
+    refcount[V2P(r) / PGSIZE] = 1; //Sania Rashid - new allocated page reference count = 1
+  }
   if(kmem.use_lock)
     release(&kmem.lock);
   return (char*)r;
