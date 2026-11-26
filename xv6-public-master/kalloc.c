@@ -105,3 +105,44 @@ kalloc(void)
   return (char*)r;
 }
 
+// Helper fuunctions for reference counting - Neta Shubin
+// Increment the reference count of a page
+void
+incref(uint pa)
+{
+  if(pa >= PHYSTOP) // bounds check if given physical address exceeds top physical memory address
+    panic("incref");
+  if(kmem.use_lock)
+    acquire(&kmem.lock);
+  refcount[pa / PGSIZE]++;
+  if(kmem.use_lock)
+    release(&kmem.lock);
+}
+
+// Decrement the reference count of a page
+void
+decref(uint pa)
+{
+  if(pa >= PHYSTOP) 
+    panic("decref");
+  if(kmem.use_lock)
+    acquire(&kmem.lock);
+  refcount[pa / PGSIZE]--;
+  if(kmem.use_lock)
+    release(&kmem.lock);
+}
+
+// Get the reference count of a page
+uchar
+getref(uint pa)
+{
+  uchar c;
+  if(pa >= PHYSTOP)
+    panic("getref");
+  if(kmem.use_lock)
+    acquire(&kmem.lock);
+  c = refcount[pa / PGSIZE];
+  if(kmem.use_lock)
+    release(&kmem.lock);
+  return c;
+}

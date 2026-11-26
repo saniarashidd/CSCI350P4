@@ -392,3 +392,107 @@ copyout(pde_t *pgdir, uint va, void *p, uint len)
 //PAGEBREAK!
 // Blank page.
 
+// Share physical pages instead of copying them - Neta Shubin
+pde_t*
+cowuvm(pde_t *pgdir, uint sz)
+{
+  pde_t *d;
+  pte_t *pte;
+  uint pa, i, flags;
+
+  // Allocate a new page directory with kernel mappings for the child process
+  if((d = setupkvm()) == 0)
+    return 0;
+
+  // Iterate through the parent's user virtual address space one page at a time
+  for(i = 0; i < sz; i += PGSIZE){
+    // Find the PTE for virtual address i in the parent's page directory
+    // If the PTE does not exist or the page is not present, panic
+    if((pte = walkpgdir(pgdir, (void *) i, 0)) == 0)
+      panic("cowuvm: pte should exist"); // Aka no second-level page table allocated yet
+    if(!(*pte & PTE_P))
+      panic("cowuvm: page not present"); // Aka second-level page table exists, so walkpgdir() returns a valid pointer but the PTE_P ("Present") flag bit is 0 aka no valid present physical page mapped into it
+
+    // // Get the physical frame address and flag bits from the parent's PTE
+    pa = PTE_ADDR(*pte);
+    flags = PTE_FLAGS(*pte);
+
+    // If the page is currently writable, make it read-only and mark it as CoW
+    // so writes trigger a page fault instead of mutating the shared frame directly
+    if(flags & PTE_W){
+      flags = (flags & ~PTE_W) | PTE_COW;
+      *pte = pa | flags;
+    }
+
+    // Map the same physical frame into the child's page table with the updated flags seen above
+    if(mappages(d, (void*)i, PGSIZE, pa, flags) < 0){
+      freevm(d);
+      return 0;
+    }
+
+    // One more process now shares this physical page, so increment its refcount
+    incref(pa);
+  }
+
+  // Reload CR3 to account for old TLB entries for the parent's modified PTEs
+  lcr3(V2P(pgdir));
+  return d;
+}
+
+// Handle a page fault by checking if the faulting page is marked as copy-on-write (CoW). If it is, allocate a new physical page, copy the contents from the old page to the new one, update the page table entry to point to the new page, and update the reference counts accordingly. If the page is not CoW or any other error occurs, mark the process as killed. - Neta Shubin
+void
+pagefault(void)
+{
+  uint va = rcr2(); // Faulting virtual address stored by hardware in CR2
+  struct proc *curproc = myproc(); // Process that triggered the fault
+  pte_t *pte;
+  uint pa, flags;
+  char *mem;
+
+  // Reject null or kernel-space faulting addresses by terminating the process
+  if(curproc == 0 || va == 0 || va >= KERNBASE){
+    if(curproc)
+      curproc->killed = 1;
+    return;
+  }
+
+  // Look up the PTE corresponding to the page containing virtual address va (do not allocate)
+  pte = walkpgdir(curproc->pgdir, (void*)PGROUNDDOWN(va), 0);
+
+  // Only handle faults on present user pages explicitly marked as PTE_COW;
+  // otherwise it is an invalid/illegal access, so kill the process
+  if(pte == 0 || !(*pte & PTE_P) || !(*pte & PTE_COW)){
+    curproc->killed = 1;
+    return;
+  }
+
+  // Get physical address and flags from the PTE for the faulting page
+  pa = PTE_ADDR(*pte);
+  flags = PTE_FLAGS(*pte);
+
+  // Check if more than one process still shares this physical page
+  if(getref(pa) > 1){
+    // Allocate a brand-new physical page for the faulting process now
+    if((mem = kalloc()) == 0){
+      curproc->killed = 1;
+      return;
+    }
+    
+    // Copy the old page's contents into the newly allocated physical page
+    memmove(mem, (char*)P2V(pa), PGSIZE);
+
+    // Clear PTE_COW and set PTE_W on this process's PTE, pointing to the new frame
+    flags = (flags & ~PTE_COW) | PTE_W;
+    *pte = V2P(mem) | flags;
+
+    // Decrement the old shared physical page's count since this process left it
+    decref(pa);
+  } else {
+    // Only one process references this page now (other sharers forked/exited or copied):
+    // no copy is needed so just restore write permission and clear PTE_COW
+    *pte = pa | ((flags & ~PTE_COW) | PTE_W);
+  }
+
+  // Reload CR3 to flush the TLB and ensure the CPU uses the updated page table
+  lcr3(V2P(curproc->pgdir));
+}

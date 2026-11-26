@@ -77,6 +77,19 @@ trap(struct trapframe *tf)
             cpuid(), tf->cs, tf->eip);
     lapiceoi();
     break;
+  case T_PGFLT: // Add a case for CoW page faults - Neta Shubin
+    // If the page fault occurred in user space, call the pagefault helper
+    if(myproc() != 0 && (tf->cs & 3) == DPL_USER){
+      pagefault();
+    } else {
+      // Unexpected fault outside normal user CoW handling; mark process killed if present
+      cprintf("pid %d %s: unexpected page fault va 0x%x\n",
+              myproc() ? myproc()->pid : 0,
+              myproc() ? myproc()->name : "kernel", rcr2());
+      if(myproc())
+        myproc()->killed = 1;
+    }
+    break;
 
   //PAGEBREAK: 13
   default:

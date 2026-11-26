@@ -69,6 +69,10 @@ void            kfree(char*);
 void            kinit1(void*, void*);
 void            kinit2(void*, void*);
 extern uchar refcount[]; //Sania Rashid
+// helper functions for reference counting - Neta Shubin
+void            incref(uint);
+void            decref(uint);
+uchar           getref(uint);
 
 // kbd.c
 void            kbdintr(void);
@@ -186,6 +190,9 @@ void            switchuvm(struct proc*);
 void            switchkvm(void);
 int             copyout(pde_t*, uint, void*, uint);
 void            clearpteu(pde_t *pgdir, char *uva);
+// Added CoW fork helper and page fault handler so proc.c and trap.c can call them - Neta Shubin
+pde_t*          cowuvm(pde_t*, uint);
+void            pagefault(void);
 
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))
