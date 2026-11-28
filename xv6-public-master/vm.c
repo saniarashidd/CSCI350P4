@@ -270,9 +270,12 @@ deallocuvm(pde_t *pgdir, uint oldsz, uint newsz)
       pa = PTE_ADDR(*pte);
       if(pa == 0)
         panic("kfree");
+      // Remove this mapping before checking whether another process is the sole owner - Neta Shubin
+      *pte = 0;
       char *v = P2V(pa);
       kfree(v);
-      *pte = 0;
+      // Update the remaining mapping to writable if this was the last other reference - Neta Shubin
+      cowupdate(pa);
     }
   }
   return newsz;
@@ -487,6 +490,8 @@ pagefault(void)
 
     // Decrement the old shared physical page's count since this process left it
     decref(pa);
+    // Let the remaining process write without waiting for another page fault
+    cowupdate(pa);
   } else {
     // Only one process references this page now (other sharers forked/exited or copied):
     // no copy is needed so just restore write permission and clear PTE_COW

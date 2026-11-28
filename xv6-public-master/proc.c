@@ -20,6 +20,61 @@ extern void trapret(void);
 
 static void wakeup1(void *chan);
 
+// Update a CoW page when only one process still maps it - Neta Shubin
+void
+cowupdate(uint pa)
+{
+  int i, j, count, locked;
+  pte_t *pte, *sole;
+  pde_t *solepgdir;
+  struct proc *p, *curproc;
+  pte_t *pgtab;
+
+  locked = holding(&ptable.lock);
+  if(!locked)
+    acquire(&ptable.lock);
+
+  // A reference count above one means another process still shares the page so we can be done
+  if(getref(pa) != 1)
+    goto done;
+
+  // Find the sole remaining CoW mapping of this physical page
+  count = 0;
+  sole = 0;
+  solepgdir = 0;
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    if(p->state == UNUSED || p->pgdir == 0)
+      continue;
+    for(i = 0; i < NPDENTRIES; i++){
+      if(!(p->pgdir[i] & PTE_P))
+        continue;
+      pgtab = (pte_t*)P2V(PTE_ADDR(p->pgdir[i]));
+      for(j = 0; j < NPTENTRIES; j++){
+        pte = &pgtab[j];
+        if((*pte & (PTE_P | PTE_COW)) != (PTE_P | PTE_COW) ||
+           PTE_ADDR(*pte) != pa)
+          continue;
+        count++;
+        sole = pte;
+        solepgdir = p->pgdir;
+      }
+    }
+  }
+
+  if(count == 1){
+    // Restore write permission and remove the CoW marker
+    *sole = (*sole & ~PTE_COW) | PTE_W;
+    curproc = myproc();
+    // Flush stale permissions if this address space is currently active
+    if(curproc && curproc->pgdir == solepgdir)
+      lcr3(V2P(solepgdir));
+  }
+
+done:
+  if(!locked)
+    release(&ptable.lock);
+}
+
 void
 pinit(void)
 {
