@@ -79,7 +79,7 @@ trap(struct trapframe *tf)
     break;
   case T_PGFLT: // Add a case for CoW page faults - Neta Shubin
     // If the page fault occurred in user space, call the pagefault helper
-    if(myproc() != 0 && (tf->cs & 3) == DPL_USER){
+    if(myproc() != 0 && rcr2() < KERNBASE){
       pagefault();
     } else {
       // Unexpected fault outside normal user CoW handling; mark process killed if present
