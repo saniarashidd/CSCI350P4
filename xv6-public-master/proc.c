@@ -547,7 +547,7 @@ procdump(void)
           }
           uint vpn = pdI * NPTENTRIES + ptI; //compute virtual page number
           uint ppn = PTE_ADDR(pte) / PGSIZE; // compute physical page number
-          cprintf("%d -> %d , %s\n", vpn, ppn, (pte & PTE_W) ? "y" : "n");
+          cprintf("%d -> %d, %s\n", vpn, ppn, (pte & PTE_W) ? "y" : "n");
         }
       }
     }
